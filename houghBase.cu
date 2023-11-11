@@ -14,6 +14,7 @@
 #include <cuda.h>
 #include <string.h>
 #include "common/pgm.h"
+#include <cuda_runtime.h>
 
 const int degreeInc = 2;
 const int degreeBins = 180 / degreeInc;
@@ -73,7 +74,7 @@ void CPU_HoughTran (unsigned char *pic, int w, int h, int **acc)
 __global__ void GPU_HoughTran (unsigned char *pic, int w, int h, int *acc, float rMax, float rScale, float *d_Cos, float *d_Sin)
 {
   //TODO calcular: int gloID = ?
-  int gloID = w * h + 1; //TODO
+  int gloID = blockIdx.x * blockDim.x + threadIdx.x;
   if (gloID > w * h) return;      // in case of extra threads in block
 
   int xCent = w / 2;
@@ -158,7 +159,23 @@ int main (int argc, char **argv)
   // execution configuration uses a 1-D grid of 1-D blocks, each made of 256 threads
   //1 thread por pixel
   int blockNum = ceil (w * h / 256);
+
+  cudaEvent_t start, stop;
+  cudaEventCreate(&start);
+  cudaEventCreate(&stop);
+
+  // Record start event
+  cudaEventRecord(start);
   GPU_HoughTran <<< blockNum, 256 >>> (d_in, w, h, d_hough, rMax, rScale, d_Cos, d_Sin);
+
+  // Record stop event
+  cudaEventRecord(stop);
+  cudaEventSynchronize(stop);
+
+  // Calculate elapsed time
+  float milliseconds = 0;
+  cudaEventElapsedTime(&milliseconds, start, stop);
+  printf("Kernel execution time: %f milliseconds\n", milliseconds);
 
   // get results from device
   cudaMemcpy (h_hough, d_hough, sizeof (int) * degreeBins * rBins, cudaMemcpyDeviceToHost);
@@ -171,7 +188,22 @@ int main (int argc, char **argv)
   }
   printf("Done!\n");
 
+  // Clean up events
+  cudaEventDestroy(start);
+  cudaEventDestroy(stop);
+
   // TODO clean-up
+  // Free device memory
+  cudaFree(d_in);
+  cudaFree(d_hough);
+  cudaFree(d_Cos);
+  cudaFree(d_Sin);
+
+  // Free host memory
+  free(h_hough);
+  delete[] cpuht;
+  free(pcCos);
+  free(pcSin);
 
   return 0;
 }
